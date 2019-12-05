@@ -31,6 +31,10 @@ class WikiDB:
             )""")
         self.conn.commit()
 
+    def _prepare_value_sql(self, v):
+        v = str(v).replace("\"", "'")
+        return F"\"{v}\""
+
     def insert_many(self, table, col=None, value_placeholder=None,
                     values=None, or_ignore=True):
         assert isinstance(value_placeholder, (list, tuple))
@@ -51,11 +55,14 @@ class WikiDB:
         c = self.conn.cursor()
         or_ignore = 'OR IGNORE' if or_ignore else ''
         col = '' if col is None else F"({','.join(col)})"
-        values = [F"\"{v}\"" for v in values]
+        values = [self._prepare_value_sql(v) for v in values]
         values = F"({','.join(values)})"
         sql = F"INSERT {or_ignore} INTO {table} {col} VALUES {values}"
         # print(sql)
-        c.execute(sql)
+        try:
+            c.execute(sql)
+        except Exception:
+            raise Exception(sql)
         # Save (commit) the changes
         self.conn.commit()
 
@@ -83,6 +90,8 @@ class WikiDB:
             LIMIT {limit}
         """
         return self._fetchall(sql)
+
+
 
     # Insert the starting point
     # c.execute(f"INSERT OR IGNORE INTO link_map VALUES ('1', '-1', '{starting_point}')")
