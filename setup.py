@@ -10,7 +10,12 @@ with open('README.rst') as readme_file:
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = [ ]
+requirements = ['wikipedia', ]
+
+entry_points = '''
+    [console_scripts]
+    scrape_wiki=abbmatch.wiki_scraper:run_scraper
+'''
 
 setup_requirements = ['pytest-runner', ]
 
@@ -38,6 +43,7 @@ setup(
     include_package_data=True,
     keywords='abbmatch',
     name='abbmatch',
+    entry_points=entry_points,
     packages=find_packages(include=['abbmatch', 'abbmatch.*']),
     setup_requires=setup_requirements,
     test_suite='tests',

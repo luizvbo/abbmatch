@@ -3,51 +3,38 @@ from wikipedia import WikipediaPage, PageError
 from wikipedia.exceptions import DisambiguationError
 from abbmatch import logger
 from multiprocessing import Pool, cpu_count
+import click
 
 
 class WikiScraper:
-    def __init__(self, starting_link=None):
+    def __init__(self, starting_link=None, sqlite_path=None):
         """Class constructor
 
         Args:
-            starting_link (str, optional): Initial topic from wikipedia to start the scraping.
-                A suggestion would be to use "Lists_of_companies". Defaults to None.
+            starting_link (str, optional): Initial topic from wikipedia to
+                start scraping from. A suggestion would be to use
+                "Lists_of_companies". Defaults to None.
+            sqlite_path (str, optional): Path to the sqlite file where
+                the data will be stored.
         """
-        self.wiki_db = WikiDB()
+
+        self.wiki_db = WikiDB() if sqlite_path is None else WikiDB(sqlite_path)
         self.wiki_db.create_database()
         if starting_link is not None:
-            self.wiki_db.insert_one('link_map', values=(0, 0, -1, starting_link))
+            self.wiki_db.insert_one('link_map',
+                                    values=(0, 0, -1, starting_link))
 
-    def get_unvisited_links(self, max_depth=6, limit=30):
-        """Get the list of links not visited from the database
-
-        Args:
-            max_depth (int, optional): Maximum depth to consider starting from the
-                `starting_link`.  Defaults to 6.
-            limit (int, optional): Maximum number of links to process in parallel per
-                iteration. Defaults to 30.
-
-        Returns:
-            list((str, str, str)): List of links retrieved from the DB. The items
-                are tuples (id_link, link, current_depth)
-        """
-        sql = F"""
-            SELECT id, link, depth FROM link_map as A
-            LEFT JOIN content as B ON A.id=B.id_link
-            WHERE B.content is NULL AND depth <= {max_depth}
-            ORDER BY depth, id LIMIT {limit}
-        """
-        return self.wiki_db._fetchall(sql)
-
-    def scrape_wiki(self, max_depth=6, limit=30):
+    def scrape_wiki(self, max_depth=6, batch_size=30):
         """Scrape the links from the wikipedia iteratively
 
         Args:
-            max_depth (int, optional): [description]. Defaults to 6.
-            limit (int, optional): [description]. Defaults to 30.
+            max_depth (int, optional): Maximum depth to consider starting
+                from the `starting_link`.  Defaults to 6.
+            batch_size (int, optional): Number of items retrieved per
+                iteration. Defaults to 30.
         """
-        unvisited = self.get_unvisited_links(max_depth, limit)
-        cpu_count_ = cpu_count()
+        unvisited = self.wiki_db.get_unvisited_links(max_depth, batch_size)
+        cpu_count_ = min(cpu_count(), batch_size)
         while len(unvisited) > 0:
             logger.info(F"Processing {len(unvisited)} items in parallel")
             with Pool(processes=cpu_count_) as pool:
@@ -58,7 +45,7 @@ class WikiScraper:
                 if status == 0:
                     logger.info(F"Page '{title}' (id {id_link}) does not match any pages. Try another id!")
                     self.wiki_db.insert_one('content', ('id_link', 'content', 'title'),
-                                            (id_link, None, None))
+                                            (id_link, '', ''))
                 else:
                     logger.info("Storing content for: " + title)
                     self.wiki_db.insert_one('content', ('id_link', 'content', 'title'),
@@ -68,7 +55,7 @@ class WikiScraper:
             # for id_link, link in unvisited:
             #     logger.info(F"Processing link: '{link}'")
             #     self.process_page(id_link, link)
-            unvisited = self.get_unvisited_links(max_depth, limit)
+            unvisited = self.wiki_db.get_unvisited_links(max_depth, batch_size)
 
     def store_links(self, parent_id, depth, link_list):
         # self.wiki_db._insert_many()
@@ -92,3 +79,19 @@ def process_page(params):
     title = wiki_obj.title
     summary = wiki_obj.summary[:300].replace("\"", "'")
     return 1, (id_link, summary, depth+1, title, links)
+
+
+@click.command()
+@click.option('--starting_link', default=None,
+              help='Initial topic from wikipedia to start scraping from')
+@click.option('--batch_size', default=30,
+              help='Batch size (for parallel processing)')
+@click.option('--sqlite_path', default='abbmatch.db',
+              help='Path to the sqlite file to store the data')
+def run_scraper(starting_link, batch_size, sqlite_path):
+    wiki = WikiScraper(starting_link, sqlite_path)
+    wiki.scrape_wiki(batch_size=batch_size)
+
+
+if __name__ == "__main__":
+    run_scraper()

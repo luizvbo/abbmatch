@@ -32,6 +32,8 @@ class WikiDB:
         self.conn.commit()
 
     def _prepare_value_sql(self, v):
+        if v is None:
+            return 'NULL'
         v = str(v).replace("\"", "'")
         return F"\"{v}\""
 
@@ -71,27 +73,34 @@ class WikiDB:
         c.execute(sql)
         return c.fetchall()
 
-    # def store_links(self, parent_id, link_list):
-    #     sql = F"INSERT INTO link_map (parent_id, link) VALUES ({parent_id}, ?)"
-    #     link_list = [(l,) for l in link_list]
-    #     self._insert_many(sql, link_list)
-
     def select(self, col, table, where=None, limit=10):
         col = col if isinstance(col, str) else ','.join(col)
         where = F"where {where}" if where is not None else ""
-        sql = F"SELECT {col} FROM {table} {where} limit {limit}"
+        limit = F"limit {limit}" if limit is not None else ""
+        sql = F"SELECT {col} FROM {table} {where} {limit}"
         return self._fetchall(sql)
 
-    def get_unvisited_links(self, limit=30):
+    def get_contet(self, limit=None):
+        return self.select(['distinct content, title'], 'content',
+                           "content not like ''", limit=limit)
+
+    def get_unvisited_links(self, max_depth=6, limit=30):
+        """Get the list of links not visited from the database
+
+        Args:
+            max_depth (int, optional): Maximum depth to consider starting
+                from the `starting_link`.  Defaults to 6.
+            limit (int, optional): Maximum number of links to process in
+                parallel per iteration. Defaults to 30.
+
+        Returns:
+            list((str, str, str)): List of links retrieved from the DB. The items
+                are tuples (id_link, link, current_depth)
+        """
         sql = F"""
-            SELECT id, link FROM link_map as A
+            SELECT id, link, depth FROM link_map as A
             LEFT JOIN content as B ON A.id=B.id_link
-            WHERE B.content is NULL ORDER BY ID
-            LIMIT {limit}
+            WHERE B.content is NULL AND depth <= {max_depth}
+            ORDER BY depth, id LIMIT {limit}
         """
         return self._fetchall(sql)
-
-
-
-    # Insert the starting point
-    # c.execute(f"INSERT OR IGNORE INTO link_map VALUES ('1', '-1', '{starting_point}')")
